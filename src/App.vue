@@ -1,7 +1,8 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useEventStore } from '@/store/event'
 import OverviewView from '@/components/OverviewView.vue'
+import ReviewView from '@/components/ReviewView.vue'
 import ScheduleView from '@/components/ScheduleView.vue'
 import ScoreView from '@/components/ScoreView.vue'
 import BracketView from '@/components/BracketView.vue'
@@ -14,12 +15,17 @@ const store = useEventStore()
 store.init()
 
 const navs = [
-  ['overview', '🏟️', '赛事总览'], ['schedule', '🗓️', '赛程编排'], ['score', '⚡', '成绩录入'],
+  ['overview', '🏟️', '赛事总览'], ['review', '🛂', '资格审核'], ['schedule', '🗓️', '赛程编排'], ['score', '⚡', '成绩录入'],
   ['bracket', '🧩', '对阵积分'], ['team', '👥', '队伍运动员'], ['venue', '📍', '场地裁判'],
   ['medal', '🥇', '奖牌榜'], ['reports', '📊', '报表中心']
 ]
 const view = ref('overview')
-const cur = { overview: OverviewView, schedule: ScheduleView, score: ScoreView, bracket: BracketView, team: TeamView, venue: VenueView, medal: MedalView, reports: ReportsView }
+const cur = { overview: OverviewView, review: ReviewView, schedule: ScheduleView, score: ScoreView, bracket: BracketView, team: TeamView, venue: VenueView, medal: MedalView, reports: ReportsView }
+
+// 跨页面跳转（如总览“前往审核”）
+const onNav = e => { if (e.detail && cur[e.detail]) view.value = e.detail }
+onMounted(() => window.addEventListener('sportflow:nav', onNav))
+onUnmounted(() => window.removeEventListener('sportflow:nav', onNav))
 </script>
 
 <template>

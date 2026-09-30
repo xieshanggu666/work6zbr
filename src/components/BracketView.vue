@@ -26,8 +26,16 @@ const stages = computed(() => {
     { name: '季军战', items: ms.filter(m => m.stage === '季军') }
   ]
 })
-function w(m) { return m.status === 'finished' && m.winner != null ? (m.winner === m.team_a ? m.teamA : m.teamB) : null }
-function l(m) { return m.status === 'finished' && m.winner != null ? (m.winner === m.team_a ? m.teamB : m.teamA) : null }
+function w(m) {
+  if (m.status === 'finished' && m.winner != null) return m.winner === m.team_a ? m.teamA : m.teamB
+  // 资格联动取消：winner 指向轮空晋级的另一方
+  if (m.status === 'cancelled' && m.winner != null) return m.winner === m.team_a ? m.teamA : m.teamB
+  return null
+}
+function l(m) {
+  if (m.status === 'finished' && m.winner != null) return m.winner === m.team_a ? m.teamB : m.teamA
+  return null
+}
 </script>
 
 <template>
@@ -64,13 +72,15 @@ function l(m) { return m.status === 'finished' && m.winner != null ? (m.winner =
       <div v-for="(st, si) in stages.filter(x=>x.items.length)" :key="st.name" class="card">
         <div class="caption"><span class="badge">{{ st.name }}</span><span class="hint">{{ st.items.length }} 场</span></div>
         <div class="pad" style="display:flex;flex-direction:column;gap:9px">
-          <div v-for="m in st.items" :key="m.id" class="mcard" :class="{ done: m.status==='finished' }">
+          <div v-for="m in st.items" :key="m.id" class="mcard" :class="{ done: m.status==='finished', canceled: m.status==='cancelled' }">
             <div class="mrow">
               <span class="t" :class="{ win: m.winner != null && m.winner === m.team_a }"><span class="badge"><span class="dot" :style="{ background: store.unitOfUid(m.teamA?.unit_id)?.color }"></span>{{ m.teamA?.name || '待定' }}</span></span>
               <span class="score-chip" v-if="m.status==='finished'">{{ m.score_a }}:{{ m.score_b }}<template v-if="m.tb_a != null">（决胜 {{ m.tb_a }}:{{ m.tb_b }}）</template></span>
+              <span class="score-chip canceled" v-else-if="m.status==='cancelled'">取消</span>
               <span class="score-chip ph" v-else>VS</span>
               <span class="t" :class="{ win: m.winner != null && m.winner === m.team_b }" style="text-align:right"><span class="badge">{{ m.teamB?.name || '待定' }}<span class="dot" :style="{ background: store.unitOfUid(m.teamB?.unit_id)?.color }"></span></span></span>
             </div>
+            <div v-if="m.status==='cancelled'" class="cnote">↪ {{ m.note || '资格联动取消' }}<template v-if="m.winner != null"> · 另一方轮空</template></div>
           </div>
         </div>
       </div>

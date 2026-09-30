@@ -12,7 +12,9 @@ CREATE TABLE IF NOT EXISTS sports (
   category TEXT NOT NULL,        -- 球类/田径/水上/棋牌
   format TEXT NOT NULL,          -- roundrobin / group_knockout / knockout / track
   venue TEXT,
-  finished INTEGER DEFAULT 0
+  finished INTEGER DEFAULT 0,
+  team_quota INTEGER DEFAULT 8,    -- 队伍名额上限
+  athlete_quota INTEGER DEFAULT 16 -- 运动员（单项）名额上限
 );
 CREATE TABLE IF NOT EXISTS units (
   id INTEGER PRIMARY KEY,
@@ -23,13 +25,19 @@ CREATE TABLE IF NOT EXISTS teams (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   unit_id INTEGER NOT NULL,
-  sport_id INTEGER NOT NULL
+  sport_id INTEGER NOT NULL,
+  status TEXT DEFAULT 'pending',  -- pending 待审核 / approved 审核通过 / rejected 审核驳回 / withdrawn 已退报 / revoked 资格撤销
+  reviewed_at TEXT,
+  review_note TEXT
 );
 CREATE TABLE IF NOT EXISTS athletes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   unit_id INTEGER NOT NULL,
-  sport_id INTEGER NOT NULL
+  sport_id INTEGER NOT NULL,
+  status TEXT DEFAULT 'pending',
+  reviewed_at TEXT,
+  review_note TEXT
 );
 CREATE TABLE IF NOT EXISTS venues (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +65,8 @@ CREATE TABLE IF NOT EXISTS matches (
   tb_a INTEGER,          -- 加时/点球决胜比分（淘汰赛常规时间平分时必填）
   tb_b INTEGER,
   winner INTEGER,        -- 胜方队伍id（唯一权威数据源；小组/循环平局为 NULL）
-  status TEXT DEFAULT 'scheduled'   -- scheduled / finished
+  status TEXT DEFAULT 'scheduled',  -- scheduled / finished / cancelled
+  note TEXT              -- 取消原因（如队伍退报/资格撤销联动取消）
 );
 CREATE TABLE IF NOT EXISTS entries (
   -- 田径成绩（单项）
@@ -90,8 +99,15 @@ CREATE TABLE IF NOT EXISTS medals (
 `)
 
 // —— 旧库迁移：补充淘汰赛平分决胜字段（列已存在则忽略） ——
-;[['tb_a', 'INTEGER'], ['tb_b', 'INTEGER'], ['winner', 'INTEGER']].forEach(([col, def]) => {
+;[['tb_a', 'INTEGER'], ['tb_b', 'INTEGER'], ['winner', 'INTEGER'], ['note', 'TEXT']].forEach(([col, def]) => {
   try { db.prepare(`ALTER TABLE matches ADD COLUMN ${col} ${def}`).run() } catch (e) { /* 列已存在 */ }
+})
+;[['status', `TEXT DEFAULT 'approved'`], ['reviewed_at', 'TEXT'], ['review_note', 'TEXT']].forEach(([col, def]) => {
+  try { db.prepare(`ALTER TABLE teams ADD COLUMN ${col} ${def}`).run() } catch (e) {}
+  try { db.prepare(`ALTER TABLE athletes ADD COLUMN ${col} ${def}`).run() } catch (e) {}
+})
+;[['team_quota', 'INTEGER DEFAULT 8'], ['athlete_quota', 'INTEGER DEFAULT 16']].forEach(([col, def]) => {
+  try { db.prepare(`ALTER TABLE sports ADD COLUMN ${col} ${def}`).run() } catch (e) {}
 })
 // 回填历史已完赛场次的胜方；小组/循环平局 winner 保持 NULL
 db.prepare(`UPDATE matches SET winner = CASE WHEN score_a > score_b THEN team_a WHEN score_b > score_a THEN team_b ELSE NULL END WHERE status='finished' AND winner IS NULL`).run()

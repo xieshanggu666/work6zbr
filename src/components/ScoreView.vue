@@ -11,7 +11,8 @@ const ballSports = computed(() => store.sports.filter(s => s.format !== 'track')
 const matches = computed(() => store.matches.filter(m => {
   const s = store.sports.find(x => x.id === m.sport_id)
   if (curSport.value !== 'all' && m.sport_id !== Number(curSport.value)) return false
-  return s && s.format !== 'track'
+  // 已因退报/撤销作废的场次不再参与成绩录入
+  return s && s.format !== 'track' && m.status !== 'cancelled'
 }))
 const trackSports = computed(() => store.sports.filter(s => s.format === 'track'))
 

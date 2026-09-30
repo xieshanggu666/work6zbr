@@ -4,6 +4,9 @@ import { useEventStore } from '@/store/event'
 
 const store = useEventStore()
 const ov = computed(() => store.overview || {})
+const pendingTotal = computed(() => (store.review?.pendingTeams || 0) + (store.review?.pendingAthletes || 0))
+
+const gotoReview = () => window.dispatchEvent(new CustomEvent('sportflow:nav', { detail: 'review' }))
 
 const tot = computed(() => store.sports.length)
 const doneTotal = computed(() => ov.value.finishedMatches || 0)
@@ -17,6 +20,12 @@ const prog = computed(() => tot.value ? Math.round((doneTotal.value / Math.max(1
       <div class="row">
         <button class="btn ghost sm" @click="store.refresh">🔄 刷新</button>
       </div>
+    </div>
+
+    <div v-if="pendingTotal" class="review-banner">
+      <span class="rb-ic">🛂</span>
+      <div class="rb-txt"><b>{{ pendingTotal }} 条报名待审核</b><span>队伍 {{ store.review?.pendingTeams || 0 }} · 运动员 {{ store.review?.pendingAthletes || 0 }}，请尽快审核资格与名额</span></div>
+      <a class="btn primary sm" href="#" @click.prevent="gotoReview">前往审核 →</a>
     </div>
 
     <div class="grid g4">
