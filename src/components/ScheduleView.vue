@@ -59,16 +59,18 @@ const canKO = sid => {
         <div class="pad" style="display:flex;flex-direction:column;gap:10px;max-height:520px;overflow:auto">
           <div v-for="m in list.filter(x=>x.sport_id===s.id).sort((a,b)=>a.order_no-b.order_no)" :key="m.id" class="mcard" :class="{ done: m.status==='finished' }">
             <div class="mheader">
-              <span><span class="tag" :class="m.status==='finished' ? '' : 'o'">{{ m.stage }}{{ m.group_name ? ' · ' + m.group_name : '' }}</span></span>
+              <span><span class="tag" :class="m.status==='finished' ? '' : m.status==='void' ? 'r' : 'o'">{{ m.stage }}{{ m.group_name ? ' · ' + m.group_name : '' }}</span></span>
               <span>⏱ {{ m.time_label }}</span>
             </div>
             <div class="mrow">
               <span class="t"><span class="badge"><span class="dot" :style="{ background: store.unitOfUid(m.teamA?.unit_id)?.color }"></span>{{ m.teamA?.name || '待定' }}</span></span>
               <span class="score-chip ph" v-if="m.status==='scheduled'">VS</span>
+              <span class="score-chip ph" v-else-if="m.status==='void'">已取消</span>
               <span class="score-chip" v-else>{{ m.score_a }}:{{ m.score_b }}<template v-if="m.tb_a != null">（决胜 {{ m.tb_a }}:{{ m.tb_b }}）</template></span>
               <span class="t" style="text-align:right"><span class="badge">{{ m.teamB?.name || '待定' }}<span class="dot" :style="{ background: store.unitOfUid(m.teamB?.unit_id)?.color }"></span></span></span>
             </div>
-            <div style="font-size:11px;color:var(--muted);margin-top:8px">📍 {{ m.venue?.name }} <span style="float:right" :class="m.status==='finished' ? 'tag g' : 'tag o'">{{ m.status==='finished' ? '已完赛' : '待赛' }}</span></div>
+            <div v-if="m.note" class="note-line">📝 {{ m.note }}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:8px">📍 {{ m.venue?.name }} <span style="float:right" :class="m.status==='finished' ? 'tag g' : m.status==='void' ? 'tag r' : 'tag o'">{{ m.status==='finished' ? '已完赛' : m.status==='void' ? '已取消' : '待赛' }}</span></div>
           </div>
           <div v-if="!list.filter(x=>x.sport_id===s.id).length" class="empty">暂无场次</div>
         </div>
@@ -76,3 +78,7 @@ const canKO = sid => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.note-line { font-size: 12px; color: var(--muted); margin-top: 6px; padding: 5px 9px; background: var(--bg2); border-radius: 8px; }
+</style>

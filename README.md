@@ -35,6 +35,7 @@ event/
         ├── ScheduleView.vue     # 赛程编排（自动对阵 + 淘汰推进）
         ├── ScoreView.vue        # 成绩录入
         ├── BracketView.vue      # 对阵与积分榜
+        ├── RegistrationView.vue # 报名与资格审核（提交/审核/退报/撤销）
         ├── TeamView.vue         # 队伍与运动员
         ├── VenueView.vue        # 场地与裁判
         ├── MedalView.vue        # 奖牌榜
@@ -54,16 +55,17 @@ npm run dev      # 后端 4170 + 前端 5203
 
 | 表 | 说明 |
 |----|------|
-| `sports` | 比赛项目（类别 / 赛制 format：roundrobin·group_knockout·knockout·track） |
+| `sports` | 比赛项目（类别 / 赛制 format：roundrobin·group_knockout·knockout·track / 名额 quota） |
 | `units` | 参赛单位（学院/俱乐部，含主题色） |
-| `teams` | 队伍（归属单位 + 项目） |
-| `athletes` | 运动员（田径等单项） |
+| `teams` | 队伍（归属单位 + 项目 + 状态 status：pending/approved/rejected/withdrawn/revoked） |
+| `athletes` | 运动员（田径等单项 + 状态 status） |
 | `venues` | 场地 |
 | `referees` | 裁判 |
-| `matches` | 对阵场次（小组/半决赛/决赛/季军，比分、决胜比分、胜方与状态） |
+| `matches` | 对阵场次（小组/半决赛/决赛/季军，比分、决胜比分、胜方与状态 status：scheduled/finished/void，备注 note 记录弃权/成绩取消原因） |
 | `entries` | 单项成绩（mark + rank） |
-| `standings` | 积分榜（赛/胜/平/负/进失/积分/排名） |
+| `standings` | 积分榜（赛/胜/平/负/进失/积分/排名，仅统计已通过资格审核的队伍） |
 | `medals` | 奖牌榜（金/银/铜） |
+| `registrations` | 参赛报名与资格审核（kind：team/athlete，状态流转 pending→approved/rejected，退报 withdrawn / 撤销 revoked，含名额序号 quota_no、审核人与备注） |
 
 ## 核心算法
 
@@ -78,7 +80,9 @@ npm run dev      # 后端 4170 + 前端 5203
 
 ## 核心流程
 
-赛程编排（自动生成对阵）→ 录入比分（成绩录入页）→ 积分榜/排名自动更新 → 完赛阶段动态编排下一轮淘汰赛 → 单项目决出冠亚季 → 汇总至奖牌榜与报表中心。
+**参赛资格审核**（报名审核页）：各单位提交队伍/运动员报名 → 组委会审核资格与名额（通过数不得超过项目名额上限）→ 通过后纳入参赛名单；循环赛项目若尚未开赛则自动重排对阵，把新队伍纳入赛程。退报或资格撤销时**同步处理受影响的对阵及成绩**：未赛场次判弃权（对手 3:0 胜），已赛场次取消成绩并重算积分榜与奖牌；田径项目删除该运动员成绩并重排名。
+
+**赛事编排**：赛程编排（自动生成对阵）→ 录入比分（成绩录入页）→ 积分榜/排名自动更新 → 完赛阶段动态编排下一轮淘汰赛 → 单项目决出冠亚季 → 汇总至奖牌榜与报表中心。
 
 ## 脚本
 

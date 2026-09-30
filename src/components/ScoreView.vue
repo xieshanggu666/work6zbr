@@ -67,7 +67,7 @@ const rankCls = r => r === 1 ? '#d99a00' : r === 2 ? '#90a4ae' : r === 3 ? '#c97
       <div v-for="m in matches" :key="m.id" class="mcard" :class="{ done: m.status==='finished' }">
         <div class="mheader">
           <span>{{ store.sports.find(x=>x.id===m.sport_id)?.name }} · {{ m.stage }}{{ m.group_name ? ' · ' + m.group_name : '' }}</span>
-          <span class="tag" :class="m.status==='finished' ? 'g' : 'o'">{{ m.status==='finished' ? '已完赛' : '待赛' }}</span>
+          <span class="tag" :class="m.status==='finished' ? 'g' : m.status==='void' ? 'r' : 'o'">{{ m.status==='finished' ? '已完赛' : m.status==='void' ? '已取消' : '待赛' }}</span>
         </div>
         <div class="mrow">
           <span class="t"><span class="badge"><span class="dot" :style="{ background: store.unitOfUid(m.teamA?.unit_id)?.color }"></span>{{ m.teamA?.name }}</span></span>
@@ -77,10 +77,12 @@ const rankCls = r => r === 1 ? '#d99a00' : r === 2 ? '#90a4ae' : r === 3 ? '#c97
           </template>
           <template v-else>
             <span class="score-chip ph" v-if="m.status==='scheduled'">—</span>
+            <span class="score-chip ph" v-else-if="m.status==='void'">已取消</span>
             <span class="score-chip" v-else>{{ m.score_a }}:{{ m.score_b }}<template v-if="m.tb_a != null">（决胜 {{ m.tb_a }}:{{ m.tb_b }}）</template></span>
           </template>
           <span class="t" style="text-align:right"><span class="badge">{{ m.teamB?.name }}<span class="dot" :style="{ background: store.unitOfUid(m.teamB?.unit_id)?.color }"></span></span></span>
         </div>
+        <div v-if="m.note" class="note-line">📝 {{ m.note }}</div>
         <div v-if="active?.id === m.id && needTB" class="tbrow">
           <span>⚔️ 常规时间平分 · 加时/点球决胜：</span>
           <input v-model.number="ta" type="number" min="0" class="score-in" style="width:48px">
@@ -126,4 +128,5 @@ const rankCls = r => r === 1 ? '#d99a00' : r === 2 ? '#90a4ae' : r === 3 ? '#c97
 <style scoped>
 .score-in { font-weight: 800; font-size: 15px; text-align: center; }
 .tbrow { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; padding: 7px 10px; border-radius: 10px; background: #fff7ed; border: 1px dashed var(--accent); font-size: 12px; color: var(--muted); }
+.note-line { font-size: 12px; color: var(--muted); margin-top: 8px; padding: 5px 9px; background: var(--bg2); border-radius: 8px; }
 </style>

@@ -88,6 +88,35 @@ function seed() {
   const marks = [10.62, 10.88, 11.05, 11.21, 11.35, 11.42, 11.58, 11.79]
   all('SELECT id,name FROM athletes').forEach((ath, i) => run('INSERT INTO entries (sport_id,athlete_id,mark,rank,unit_id) VALUES (?,?,?,?,?)', sp100, ath.id, marks[i], i + 1, get('SELECT unit_id FROM athletes WHERE id=?', ath.id).unit_id))
 
+  // —— 为已有队伍/运动员补建「已通过」报名记录（完整审计轨迹）——
+  all('SELECT id, name, unit_id, sport_id FROM teams').forEach(t => {
+    if (!get('SELECT id FROM registrations WHERE team_id=?', t.id)) {
+      run(`INSERT INTO registrations (kind,unit_id,sport_id,team_id,name,status,reviewer,reviewed_at)
+           VALUES ('team',?,?,?,?,'approved','组委会',datetime('now','localtime'))`, t.unit_id, t.sport_id, t.id, t.name)
+    }
+  })
+  all('SELECT id, name, unit_id, sport_id FROM athletes').forEach(a => {
+    if (!get('SELECT id FROM registrations WHERE athlete_id=?', a.id)) {
+      run(`INSERT INTO registrations (kind,unit_id,sport_id,athlete_id,name,status,reviewer,reviewed_at)
+           VALUES ('athlete',?,?,?,?,'approved','组委会',datetime('now','localtime'))`, a.unit_id, a.sport_id, a.id, a.name)
+    }
+  })
+
+  // —— 演示：新增待审核报名（队伍/运动员），由组委会审核资格与名额 ——
+  const addPendingTeam = (name, unit, sport) => {
+    const r = run('INSERT INTO teams (name,unit_id,sport_id,status) VALUES (?,?,?,?)', name, unitId[unit], sport, 'pending')
+    const tid = Number(r.lastInsertRowid)
+    run('INSERT INTO registrations (kind,unit_id,sport_id,team_id,name,status) VALUES (?,?,?,?,?,?)', 'team', unitId[unit], sport, tid, name, 'pending')
+  }
+  const addPendingAthlete = (name, unit, sport) => {
+    const r = run('INSERT INTO athletes (name,unit_id,sport_id,status) VALUES (?,?,?,?)', name, unitId[unit], sport, 'pending')
+    const aid = Number(r.lastInsertRowid)
+    run('INSERT INTO registrations (kind,unit_id,sport_id,athlete_id,name,status) VALUES (?,?,?,?,?,?)', 'athlete', unitId[unit], sport, aid, name, 'pending')
+  }
+  addPendingTeam('雷霆三队', '雷霆学院', spBasket)
+  addPendingTeam('飞鹰二队', '飞鹰学院', spFoot)
+  addPendingAthlete('许诺', '星河学院', sp100)
+
   recomputeMedals()
 }
 /* ================= 积分与奖牌 ================= */
@@ -95,7 +124,8 @@ function rebuildStandings(sportId) {
   const sports = sportId ? [sportId] : all('SELECT * FROM sports').map(s => s.id)
   sports.forEach(sid => {
     all('SELECT id FROM standings WHERE sport_id=?', sid).forEach(r => run('DELETE FROM standings WHERE id=?', r.id))
-    const teams = all('SELECT id FROM teams WHERE sport_id=?', sid).map(t => t.id)
+    // 仅已通过资格审核的队伍纳入积分榜
+    const teams = all(`SELECT id FROM teams WHERE sport_id=? AND status='approved'`, sid).map(t => t.id)
     teams.forEach(t => run('INSERT INTO standings (sport_id,team_id) VALUES (?,?)', sid, t))
     const done = all(`SELECT * FROM matches WHERE sport_id=? AND status='finished'`, sid)
     done.forEach(m => {
@@ -199,7 +229,9 @@ function generateKO(sportId) {
   const hasSemi = get(`SELECT id FROM matches WHERE sport_id=? AND stage='半决赛'`, sportId)
   if (groups.every(g => done[g]) && !hasSemi) {
     const rankOf = g => {
-      const ids = all(`SELECT DISTINCT team_a id FROM matches WHERE sport_id=? AND group_name=? AND team_a IS NOT NULL UNION SELECT DISTINCT team_b FROM matches WHERE sport_id=? AND group_name=? AND team_b IS NOT NULL`, sportId, g, sportId, g).map(r => r.id)
+      const ids = all(`SELECT DISTINCT team_a id FROM matches WHERE sport_id=? AND group_name=? AND team_a IS NOT NULL UNION SELECT DISTINCT team_b FROM matches WHERE sport_id=? AND group_name=? AND team_b IS NOT NULL`, sportId, g, sportId, g)
+        .map(r => r.id)
+        .filter(id => get('SELECT status FROM teams WHERE id=?', id)?.status === 'approved')
       // 与积分榜同一排名口径（积分 → 净胜球），避免同分时晋级对阵与榜单不一致
       return ids.map(id => ({ id, rank: get('SELECT rank r FROM standings WHERE sport_id=? AND team_id=?', sportId, id)?.r ?? 999 })).sort((a, b) => a.rank - b.rank).map(r => r.id)
     }
@@ -230,6 +262,110 @@ function finishTrack(sportId, body) {
 
   recomputeMedals()
 }
+/* ================= 参赛资格审核（报名 → 审核 → 退报/撤销） ================= */
+function submitRegistration(kind, unitId, sportId, name) {
+  if (!get('SELECT id FROM units WHERE id=?', unitId)) throw new Error('参赛单位不存在')
+  if (!get('SELECT id FROM sports WHERE id=?', sportId)) throw new Error('比赛项目不存在')
+  name = (name || '').trim()
+  if (!name) throw new Error('名称不能为空')
+  if (kind === 'team') {
+    if (get('SELECT id FROM teams WHERE name=? AND sport_id=? AND unit_id=?', name, sportId, unitId)) throw new Error('该单位已报名同名队伍')
+    const r = run('INSERT INTO teams (name,unit_id,sport_id,status) VALUES (?,?,?,?)', name, unitId, sportId, 'pending')
+    const teamId = Number(r.lastInsertRowid)
+    run('INSERT INTO registrations (kind,unit_id,sport_id,team_id,name,status) VALUES (?,?,?,?,?,?)', kind, unitId, sportId, teamId, name, 'pending')
+    return { id: teamId, kind }
+  }
+  if (get('SELECT id FROM athletes WHERE name=? AND sport_id=? AND unit_id=?', name, sportId, unitId)) throw new Error('该单位已报名同名运动员')
+  const r = run('INSERT INTO athletes (name,unit_id,sport_id,status) VALUES (?,?,?,?)', name, unitId, sportId, 'pending')
+  const athId = Number(r.lastInsertRowid)
+  run('INSERT INTO registrations (kind,unit_id,sport_id,athlete_id,name,status) VALUES (?,?,?,?,?,?)', kind, unitId, sportId, athId, name, 'pending')
+  return { id: athId, kind }
+}
+
+function approveRegistration(regId, reviewer) {
+  const reg = get('SELECT * FROM registrations WHERE id=?', regId)
+  if (!reg) throw new Error('报名记录不存在')
+  if (reg.status !== 'pending') throw new Error('该报名已处理，不能重复审核')
+  const quota = get('SELECT quota FROM sports WHERE id=?', reg.sport_id)?.quota ?? 8
+  const approved = reg.kind === 'team'
+    ? get(`SELECT COUNT(*) c FROM teams WHERE sport_id=? AND status='approved'`, reg.sport_id).c
+    : get(`SELECT COUNT(*) c FROM athletes WHERE sport_id=? AND status='approved'`, reg.sport_id).c
+  if (approved >= quota) throw new Error(`名额已满（${quota} 个），无法通过`)
+  const quotaNo = approved + 1
+  run(`UPDATE registrations SET status='approved', quota_no=?, reviewed_at=datetime('now','localtime'), reviewer=? WHERE id=?`, quotaNo, reviewer || '组委会', regId)
+  if (reg.kind === 'team') {
+    run(`UPDATE teams SET status='approved' WHERE id=?`, reg.team_id)
+    // 循环赛：若尚未开赛，重新排定循环赛程，把新队伍纳入对阵
+    const spo = get('SELECT * FROM sports WHERE id=?', reg.sport_id)
+    const finished = get(`SELECT COUNT(*) c FROM matches WHERE sport_id=? AND status='finished'`, reg.sport_id).c
+    if (spo.format === 'roundrobin' && finished === 0) {
+      run(`DELETE FROM matches WHERE sport_id=?`, reg.sport_id)
+      const teams = all(`SELECT id FROM teams WHERE sport_id=? AND status='approved'`, reg.sport_id).map(t => t.id)
+      const pairs = arr => { const p = []; for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) p.push([arr[i], arr[j]]); return p }
+      let ono = 0
+      pairs(teams).forEach(([a, b]) => { ono++; run('INSERT INTO matches (sport_id,stage,team_a,team_b,order_no,status) VALUES (?,?,?,?,?,?)', reg.sport_id, '循环', a, b, ono, 'scheduled') })
+    }
+  } else {
+    run(`UPDATE athletes SET status='approved' WHERE id=?`, reg.athlete_id)
+  }
+  rebuildStandings(reg.sport_id)
+  recomputeMedals()
+  return { ok: true, quota_no: quotaNo }
+}
+
+function rejectRegistration(regId, note, reviewer) {
+  const reg = get('SELECT * FROM registrations WHERE id=?', regId)
+  if (!reg) throw new Error('报名记录不存在')
+  if (reg.status !== 'pending') throw new Error('该报名已处理')
+  run(`UPDATE registrations SET status='rejected', review_note=?, reviewed_at=datetime('now','localtime'), reviewer=? WHERE id=?`, note || '资料不符', reviewer || '组委会', regId)
+  if (reg.kind === 'team') run(`UPDATE teams SET status='rejected' WHERE id=?`, reg.team_id)
+  else run(`UPDATE athletes SET status='rejected' WHERE id=?`, reg.athlete_id)
+  return { ok: true }
+}
+
+// 退报（单位主动）/ 撤销资格（组委会）：同步处理受影响的对阵及成绩
+function withdrawOrRevoke(regId, action, note, reviewer) {
+  const reg = get('SELECT * FROM registrations WHERE id=?', regId)
+  if (!reg) throw new Error('报名记录不存在')
+  if (reg.status !== 'approved') throw new Error('仅已通过的报名可退报/撤销')
+  const newStatus = action === 'withdraw' ? 'withdrawn' : 'revoked'
+  const reason = note || (action === 'withdraw' ? '单位退报' : '组委会撤销资格')
+  run(`UPDATE registrations SET status=?, review_note=?, reviewed_at=datetime('now','localtime'), reviewer=? WHERE id=?`, newStatus, reason, reviewer || '组委会', regId)
+  const impact = { voided: 0, walkover: 0, entries: 0 }
+  if (reg.kind === 'team') {
+    run(`UPDATE teams SET status=? WHERE id=?`, newStatus, reg.team_id)
+    // 同步处理受影响的对阵
+    const ms = all(`SELECT * FROM matches WHERE sport_id=? AND (team_a=? OR team_b=?)`, reg.sport_id, reg.team_id, reg.team_id)
+    ms.forEach(m => {
+      if (m.status === 'scheduled') {
+        // 未赛：判弃权，对手 3:0 胜
+        const isA = m.team_a === reg.team_id
+        run(`UPDATE matches SET status='finished', score_a=?, score_b=?, winner=?, note=? WHERE id=?`,
+          isA ? 0 : 3, isA ? 3 : 0, isA ? m.team_b : m.team_a, action === 'withdraw' ? '弃权(退报)' : '弃权(撤销资格)', m.id)
+        impact.walkover++
+      } else if (m.status === 'finished') {
+        // 已赛：取消该场成绩
+        run(`UPDATE matches SET status='void', score_a=NULL, score_b=NULL, tb_a=NULL, tb_b=NULL, winner=NULL, note=? WHERE id=?`,
+          action === 'withdraw' ? '成绩取消(退报)' : '成绩取消(撤销资格)', m.id)
+        impact.voided++
+      }
+    })
+    rebuildStandings(reg.sport_id)
+  } else {
+    run(`UPDATE athletes SET status=? WHERE id=?`, newStatus, reg.athlete_id)
+    // 田径：删除该运动员在该项目的成绩
+    const r = run(`DELETE FROM entries WHERE athlete_id=? AND sport_id=?`, reg.athlete_id, reg.sport_id)
+    impact.entries = r.changes
+    recomputeTrackRanks(reg.sport_id)
+  }
+  recomputeMedals()
+  return { ok: true, impact }
+}
+
+function recomputeTrackRanks(sportId) {
+  const rows = all(`SELECT id FROM entries WHERE sport_id=? ORDER BY mark ASC`, sportId)
+  rows.forEach((r, i) => run(`UPDATE entries SET rank=? WHERE id=?`, i + 1, r.id))
+}
 seed()
 
 /* ================= API ================= */
@@ -250,6 +386,53 @@ app.get('/api/referees', (_, res) => res.json(all('SELECT * FROM referees')))
 app.get('/api/athletes', (_, res) => res.json(all('SELECT a.*, u.name unit FROM athletes a JOIN units u ON u.id=a.unit_id')))
 app.get('/api/matches', (_, res) => res.json(all('SELECT * FROM matches').map(joinMatch)))
 app.get('/api/entries', (_, res) => res.json(all('SELECT e.*, a.name aname, u.name unit FROM entries e JOIN athletes a ON a.id=e.athlete_id JOIN units u ON u.id=a.unit_id')))
+
+// 参赛报名与资格审核
+app.get('/api/registrations', (_, res) => {
+  const rows = all(`SELECT r.*, u.name unit, s.name sport, s.format, s.category,
+    CASE WHEN r.kind='team' THEN t.name ELSE a.name END AS name
+    FROM registrations r
+    JOIN units u ON u.id=r.unit_id
+    JOIN sports s ON s.id=r.sport_id
+    LEFT JOIN teams t ON t.id=r.team_id
+    LEFT JOIN athletes a ON a.id=r.athlete_id
+    ORDER BY r.id DESC`)
+  res.json(rows)
+})
+app.post('/api/registrations', (req, res) => {
+  const { kind, unit_id, sport_id, name } = req.body
+  if (!['team', 'athlete'].includes(kind)) return res.status(400).json({ error: '报名类型无效' })
+  try {
+    const r = submitRegistration(kind, Number(unit_id), Number(sport_id), name)
+    res.json({ ok: true, ...r })
+  } catch (e) { res.status(400).json({ error: e.message }) }
+})
+app.post('/api/registrations/:id/approve', (req, res) => {
+  try { res.json(approveRegistration(Number(req.params.id), req.body.reviewer)) }
+  catch (e) { res.status(400).json({ error: e.message }) }
+})
+app.post('/api/registrations/:id/reject', (req, res) => {
+  try { res.json(rejectRegistration(Number(req.params.id), req.body.note, req.body.reviewer)) }
+  catch (e) { res.status(400).json({ error: e.message }) }
+})
+app.post('/api/registrations/:id/withdraw', (req, res) => {
+  try { res.json(withdrawOrRevoke(Number(req.params.id), 'withdraw', req.body.note, req.body.reviewer)) }
+  catch (e) { res.status(400).json({ error: e.message }) }
+})
+app.post('/api/registrations/:id/revoke', (req, res) => {
+  try { res.json(withdrawOrRevoke(Number(req.params.id), 'revoke', req.body.note, req.body.reviewer)) }
+  catch (e) { res.status(400).json({ error: e.message }) }
+})
+app.get('/api/quota', (_, res) => {
+  const sports = all('SELECT * FROM sports')
+  res.json(sports.map(s => {
+    const approved = s.format === 'track'
+      ? get(`SELECT COUNT(*) c FROM athletes WHERE sport_id=? AND status='approved'`, s.id).c
+      : get(`SELECT COUNT(*) c FROM teams WHERE sport_id=? AND status='approved'`, s.id).c
+    const pending = get(`SELECT COUNT(*) c FROM registrations WHERE sport_id=? AND status='pending'`, s.id).c
+    return { sport_id: s.id, name: s.name, format: s.format, quota: s.quota, approved, pending, used: approved + pending }
+  }))
+})
 app.get('/api/standings/:sid', (req, res) => res.json(all('SELECT s.*, t.name tname, u.name unit, u.color FROM standings s JOIN teams t ON t.id=s.team_id JOIN units u ON u.id=t.unit_id WHERE s.sport_id=? ORDER BY s.rank', Number(req.params.sid))))
 app.get('/api/medals', (_, res) => res.json(all('SELECT m.*, u.name FROM medals m JOIN units u ON u.id=m.unit_id ORDER BY m.gold DESC, m.silver DESC')))
 
@@ -291,7 +474,7 @@ app.post('/api/track/:sportId', (req, res) => {
   res.json({ ok: true })
 })
 app.get('/api/reset', (_, res) => {
-  ['entries', 'standings', 'medals', 'matches', 'referees', 'venues', 'athletes', 'teams', 'units', 'sports'].forEach(t => { try { run(`DELETE FROM ${t}`) } catch (e) {} })
+  ['registrations', 'entries', 'standings', 'medals', 'matches', 'referees', 'venues', 'athletes', 'teams', 'units', 'sports'].forEach(t => { try { run(`DELETE FROM ${t}`) } catch (e) {} })
   seed()
   res.json({ ok: true })
 })
